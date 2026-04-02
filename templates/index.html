@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- pako for DEFLATE compression (required by PlantUML public server) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text2UML — AI-Powered UML Generator</title>
+    <meta name="description" content="Transform natural language into precise UML class diagrams using Google Gemini AI. Generate, preview, and refine diagrams in seconds.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* ── Design Tokens ─────────────────────────────── */
+        :root {
+            --bg:          #08080f;
+            --bg-1:        #0f0f1a;
+            --bg-2:        #14141f;
+            --bg-3:        #1c1c2e;
+            --border:      rgba(255,255,255,0.07);
+            --border-2:    rgba(255,255,255,0.12);
+            --accent:      #6c63ff;
+            --accent-glow: rgba(108,99,255,0.25);
+            --accent-dim:  rgba(108,99,255,0.12);
+            --success:     #22d3a1;
+            --danger:      #ff5572;
+            --warn:        #fbbf24;
+            --text-1:      #f0f0f8;
+            --text-2:      #9898b0;
+            --text-3:      #5c5c78;
+            --radius:      12px;
+            --radius-s:    8px;
+            --radius-xs:   6px;
+            --shadow:      0 24px 64px rgba(0,0,0,0.6);
+            --font:        'Inter', sans-serif;
+            --font-mono:   'JetBrains Mono', monospace;
+            --sidebar-w:   420px;
+            --transition:  0.2s cubic-bezier(0.4,0,0.2,1);
+        }
+
+        /* ── Reset & Base ─────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 15px; }
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text-1);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        ::selection { background: var(--accent-glow); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-2); }
+
+        /* ── Top Navigation ─────────────────────────────── */
+        .topbar {
+            height: 52px;
+            background: var(--bg-1);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            gap: 24px;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 10;
+        }
+        .topbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+        .brand-icon {
+            width: 28px;
+            height: 28px;
+            background: linear-gradient(135deg, var(--accent) 0%, #9b8fff 100%);
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .brand-icon svg { width: 16px; height: 16px; fill: white; }
+        .brand-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-1);
+            letter-spacing: -0.02em;
+        }
+        .brand-version {
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--accent);
+            background: var(--accent-dim);
+            border: 1px solid rgba(108,99,255,0.25);
+            padding: 1px 7px;
+            border-radius: 20px;
+            letter-spacing: 0.04em;
+        }
+        .topbar-center { flex: 1; }
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .topbar-badge {
+            font-size: 0.75rem;
+            color: var(--text-3);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .topbar-badge::before {
+            content: '';
+            width: 6px; height: 6px;
+            background: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .btn-icon {
+            width: 32px; height: 32px;
+            background: var(--bg-3);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xs);
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-2);
+            transition: var(--transition);
+        }
+        .btn-icon:hover { background: var(--bg-2); color: var(--text-1); border-color: var(--border-2); }
+        .btn-icon svg { width: 15px; height: 15px; }
+
+        /* ── Main Layout ─────────────────────────────── */
+        .workspace {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            height: calc(100vh - 52px);
+        }
+
+        /* ── Sidebar ─────────────────────────────── */
+        .sidebar {
+            width: var(--sidebar-w);
+            min-width: var(--sidebar-w);
+            background: var(--bg-1);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            padding: 0 16px;
+            gap: 4px;
+        }
+        .sidebar-tab {
+            padding: 12px 14px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-3);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            background: none; border-top: none; border-left: none; border-right: none;
+        }
+        .sidebar-tab:hover { color: var(--text-2); }
+        .sidebar-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .sidebar-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+        .sidebar-panel.active { display: flex; }
+        .sidebar-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        /* ── Form Elements ─────────────────────────────── */
+        .field-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-3);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .char-count {
+            font-size: 0.7rem;
+            font-weight: 400;
+            color: var(--text-3);
+            letter-spacing: 0;
+            text-transform: none;
+        }
+        .field-label span { color: var(--text-3); }
+        textarea {
+            width: 100%;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-s);
+            color: var(--text-1);
+            font-family: var(--font);
+            font-size: 0.9rem;
+            line-height: 1.65;
+            padding: 14px;
+            resize: vertical;
+            transition: border-color var(--transition), box-shadow var(--transition);
+            outline: none;
+        }
+        textarea::placeholder { color: var(--text-3); }
+        textarea:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .field-hint {
+            font-size: 0.72rem;
+            color: var(--text-3);
+            margin-top: 6px;
+        }
+
+        /* ── Buttons ─────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            padding: 10px 18px;
+            border-radius: var(--radius-s);
+            font-family: var(--font);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition);
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+        .btn-primary:hover {
+            background: #7b73ff;
+            box-shadow: 0 6px 28px rgba(108,99,255,0.45);
+            transform: translateY(-1px);
+        }
+        .btn-primary:active { transform: translateY(0); }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-2);
+            border-color: var(--border);
+        }
+        .btn-ghost:hover { background: var(--bg-3); color: var(--text-1); border-color: var(--border-2); }
+
+        .btn-danger-ghost {
+            background: transparent;
+            color: var(--danger);
+            border-color: rgba(255,85,114,0.2);
+            font-size: 0.75rem;
+        }
+        .btn-danger-ghost:hover { background: rgba(255,85,114,0.08); }
+
+        .btn-success {
+            background: transparent;
+            color: var(--success);
+            border-color: rgba(34,211,161,0.25);
+        }
+        .btn-success:hover { background: rgba(34,211,161,0.08); }
+
+        .action-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .action-row .btn-primary { flex: 1; }
+
+        /* ── Divider ─────────────────────────────── */
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 20px 0;
+        }
+
+        /* ── Refine Panel ─────────────────────────────── */
+        .refine-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .refine-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-2);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .refine-counter {
+            font-size: 0.72rem;
+            color: var(--text-3);
+        }
+        .refine-counter .count { color: var(--accent); font-weight: 700; }
+
+        /* ── Refinement History Log ─────────────────────────────── */
+        .refine-log {
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .refine-log-entry {
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-left: 2px solid var(--accent);
+            border-radius: var(--radius-xs);
+            padding: 10px 12px;
+            font-size: 0.78rem;
+            color: var(--text-2);
+            line-height: 1.5;
+            animation: fadeSlide 0.3s ease-out;
+        }
+        .refine-log-entry .log-time {
+            font-size: 0.7rem;
+            color: var(--text-3);
+            margin-bottom: 3px;
+        }
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateY(-6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── History Panel ─────────────────────────────── */
+        .history-list { display: flex; flex-direction: column; gap: 10px; }
+        .history-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-3);
+            font-size: 0.85rem;
+        }
+        .history-card {
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-s);
+            padding: 14px;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .history-card:hover {
+            border-color: var(--accent);
+            background: var(--bg-3);
+            box-shadow: 0 0 0 1px var(--accent-glow);
+        }
+        .history-card-desc {
+            font-size: 0.82rem;
+            color: var(--text-1);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .history-card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .history-chip {
+            font-size: 0.68rem;
+            color: var(--text-3);
+            background: var(--bg-3);
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 20px;
+        }
+        .history-chip.classes { color: var(--accent); border-color: rgba(108,99,255,0.3); }
+        .history-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 12px;
+        }
+
+        /* ── Main Output Area ─────────────────────────────── */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        /* ── Stats Bar ─────────────────────────────── */
+        .stats-bar {
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            height: 44px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-1);
+            gap: 32px;
+            flex-shrink: 0;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.78rem;
+        }
+        .stat-value {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--text-1);
+            min-width: 20px;
+            text-align: right;
+        }
+        .stat-label { color: var(--text-3); }
+        .stat-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--border-2);
+        }
+        .stat-dot.classes { background: var(--accent); }
+        .stat-dot.rels { background: var(--success); }
+        .stat-dot.refs { background: var(--warn); }
+        .stats-bar-spacer { flex: 1; }
+        .stats-bar-actions { display: flex; gap: 8px; }
+
+        /* ── Output Tabs ─────────────────────────────── */
+        .output-tabs {
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            background: var(--bg-1);
+            gap: 4px;
+        }
+        .output-tab {
+            padding: 11px 16px 9px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-3);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            background: none;
+            border-top: none; border-left: none; border-right: none;
+        }
+        .output-tab:hover { color: var(--text-2); }
+        .output-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        .output-content { flex: 1; overflow: hidden; position: relative; }
+        .output-panel { display: none; height: 100%; position: absolute; inset: 0; }
+        .output-panel.active { display: flex; flex-direction: column; }
+
+        /* ── Code Panel ─────────────────────────────── */
+        .code-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 18px;
+            background: var(--bg-2);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .code-toolbar-left {
+            font-size: 0.72rem;
+            color: var(--text-3);
+            font-family: var(--font-mono);
+            letter-spacing: 0.02em;
+        }
+        .code-toolbar-right { display: flex; gap: 6px; }
+        .code-block {
+            flex: 1;
+            overflow: auto;
+            padding: 20px;
+            background: var(--bg-2);
+        }
+        .code-block pre {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.75;
+            color: #c8c8e8;
+            white-space: pre;
+            margin: 0;
+        }
+        /* PlantUML syntax coloring */
+        .code-block pre .kw  { color: #9b8fff; }
+        .code-block pre .cls { color: #6cf0d8; }
+        .code-block pre .str { color: #ffca80; }
+        .code-block pre .op  { color: #ff7eb3; }
+
+        /* ── Preview Panel ─────────────────────────────── */
+        .preview-panel {
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 32px 24px;
+            background: var(--bg);
+        }
+        .preview-inner {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 24px;
+            max-width: 100%;
+            width: fit-content;
+        }
+        .preview-inner img, .preview-inner svg {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        .preview-loading {
+            text-align: center;
+            padding: 60px 40px;
+            color: var(--text-3);
+        }
+        .preview-spinner {
+            width: 32px; height: 32px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Empty State ─────────────────────────────── */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px 32px;
+            text-align: center;
+        }
+        .empty-graphic {
+            width: 80px; height: 80px;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+        }
+        .empty-graphic svg { width: 36px; height: 36px; color: var(--text-3); }
+        .empty-state h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-2);
+            margin-bottom: 8px;
+        }
+        .empty-state p {
+            font-size: 0.85rem;
+            color: var(--text-3);
+            max-width: 320px;
+            line-height: 1.6;
+        }
+        .kbd {
+            display: inline-block;
+            padding: 1px 6px;
+            border: 1px solid var(--border-2);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            color: var(--text-2);
+            background: var(--bg-2);
+        }
+
+        /* ── Toast Notifications ─────────────────────────────── */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            border-radius: var(--radius-s);
+            font-size: 0.83rem;
+            font-weight: 500;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            animation: toastIn 0.3s cubic-bezier(0.4,0,0.2,1);
+            max-width: 360px;
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(20px) scale(0.95); }
+            to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        .toast-out { animation: toastOut 0.25s ease-in forwards; }
+        @keyframes toastOut {
+            to { opacity: 0; transform: translateX(20px) scale(0.95); }
+        }
+        .toast-icon { width: 16px; height: 16px; flex-shrink: 0; }
+        .toast.success { background: #0f2a20; border: 1px solid rgba(34,211,161,0.3); color: var(--success); }
+        .toast.error   { background: #2a0f13; border: 1px solid rgba(255,85,114,0.3); color: var(--danger); }
+        .toast.info    { background: #14122a; border: 1px solid rgba(108,99,255,0.3); color: #b8b3ff; }
+
+        /* ── Global Loading Overlay ─────────────────────────────── */
+        .loading-overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(8,8,15,0.75);
+            backdrop-filter: blur(4px);
+            z-index: 50;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .loading-overlay.active { display: flex; }
+        .loading-ring {
+            width: 40px; height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        .loading-text {
+            font-size: 0.85rem;
+            color: var(--text-2);
+        }
+
+        /* ── Responsive ─────────────────────────────── */
+        @media (max-width: 900px) {
+            :root { --sidebar-w: 100%; }
+            .workspace { flex-direction: column; }
+            .sidebar { width: 100%; min-width: unset; height: 50vh; border-right: none; border-bottom: 1px solid var(--border); }
+            body { overflow: auto; }
+            .workspace { height: auto; overflow: visible; }
+            .main-area { height: 60vh; }
+        }
+
+        /* utility */
+        .hidden { display: none !important; }
+        .mt-12 { margin-top: 12px; }
+        .mt-16 { margin-top: 16px; }
+        .flex { display: flex; }
+        .flex-1 { flex: 1; }
+        .gap-8 { gap: 8px; }
+    </style>
+</head>
+<body>
+
+    <!-- ── Top Navigation ── -->
+    <nav class="topbar">
+        <a class="topbar-brand" href="/">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24"><path d="M3 3h18v4H3V3zm0 7h8v4H3v-4zm0 7h12v4H3v-4z"/></svg>
+            </div>
+            <span class="brand-name">Text2UML</span>
+        </a>
+        <div class="topbar-center"></div>
+        <div class="topbar-right">
+            <div class="topbar-badge">Gemini 2.5 Flash</div>
+        </div>
+    </nav>
+
+    <!-- ── Workspace ── -->
+    <div class="workspace">
+
+        <!-- ── Sidebar ── -->
+        <aside class="sidebar">
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" id="tab-generate-btn" onclick="switchSidebarTab('generate')">Generate</button>
+                <button class="sidebar-tab" id="tab-refine-btn" onclick="switchSidebarTab('refine')">Refine</button>
+                <button class="sidebar-tab" id="tab-history-btn" onclick="switchSidebarTab('history')">History</button>
+            </div>
+
+            <!-- Generate Panel -->
+            <div class="sidebar-panel active" id="panel-generate">
+                <div class="sidebar-scroll">
+                    <div class="form-group">
+                        <label class="field-label">
+                            Description
+                            <span class="char-count" id="char-count">0 chars</span>
+                        </label>
+                        <textarea
+                            id="description-input"
+                            rows="10"
+                            placeholder="Describe your system in natural language. For example: A university has departments, courses taught by professors, and students enrolled in multiple courses..."
+                            oninput="updateCharCount()"
+                            onkeydown="handleKeydown(event)"></textarea>
+                        <p class="field-hint">Press <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> to generate</p>
+                    </div>
+                    <div class="action-row mt-12">
+                        <button class="btn btn-primary" id="generate-btn" onclick="generateUML()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Generate UML
+                        </button>
+                        <button class="btn btn-ghost" onclick="loadExample()" title="Load example description">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            Example
+                        </button>
+                        <button class="btn btn-ghost" onclick="clearInput()" title="Clear input">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Refine Panel -->
+            <div class="sidebar-panel" id="panel-refine">
+                <div class="sidebar-scroll">
+                    <div id="refine-no-uml" class="history-empty">
+                        Generate a diagram first before refining it.
+                    </div>
+                    <div id="refine-form" class="hidden">
+                        <div class="refine-header">
+                            <span class="refine-title">Refinement Request</span>
+                            <span class="refine-counter">
+                                <span class="count" id="refine-count-display">0</span> / 5 used
+                            </span>
+                        </div>
+                        <div class="form-group">
+                            <textarea
+                                id="refinement-feedback"
+                                rows="6"
+                                placeholder="Describe what to change — e.g. 'Add a Payment class linked to Order with a processPayment() method and amount attribute.'"
+                                onkeydown="handleRefineKeydown(event)"></textarea>
+                            <p class="field-hint">Press <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> to refine</p>
+                        </div>
+                        <div class="action-row mt-12">
+                            <button class="btn btn-primary" id="refine-btn" onclick="refineUML()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.23"/></svg>
+                                Apply Refinement
+                            </button>
+                            <button class="btn btn-ghost" onclick="document.getElementById('refinement-feedback').value=''">Clear</button>
+                        </div>
+
+                        <!-- Refinement Log -->
+                        <div id="refine-log" class="refine-log hidden"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Panel -->
+            <div class="sidebar-panel" id="panel-history">
+                <div class="sidebar-scroll">
+                    <div class="history-actions">
+                        <button class="btn btn-danger-ghost" onclick="clearHistory()">Clear Session</button>
+                    </div>
+                    <div class="history-list" id="history-list">
+                        <div class="history-empty" id="history-empty">No diagrams generated yet.</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ── Main Output Area ── -->
+        <main class="main-area" style="position: relative;">
+
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="loading-ring"></div>
+                <div class="loading-text" id="loading-text">Generating diagram...</div>
+            </div>
+
+            <!-- Empty State -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-graphic">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <path d="M17.5 14v7M14 17.5h7"/>
+                        <path d="M6.5 10v4M10 6.5h4"/>
+                    </svg>
+                </div>
+                <h3>Ready to generate</h3>
+                <p>Enter a natural language description of your system in the sidebar, then hit Generate UML or press <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span>.</p>
+            </div>
+
+            <!-- Output (shown after generation) -->
+            <div id="output-section" class="hidden" style="display:none; flex-direction:column; height:100%;">
+                <!-- Stats Bar -->
+                <div class="stats-bar">
+                    <div class="stat-item">
+                        <div class="stat-dot classes"></div>
+                        <span class="stat-value" id="class-count">0</span>
+                        <span class="stat-label">Classes</span>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-dot rels"></div>
+                        <span class="stat-value" id="rel-count">0</span>
+                        <span class="stat-label">Relationships</span>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-dot refs"></div>
+                        <span class="stat-value" id="refine-count-stat">0</span>
+                        <span class="stat-label">Refinements</span>
+                    </div>
+                    <div class="stats-bar-spacer"></div>
+                    <div class="stats-bar-actions">
+                        <button class="btn btn-ghost" style="font-size:0.78rem;padding:6px 12px;" onclick="downloadPuml()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            .puml
+                        </button>
+                        <button class="btn btn-ghost" style="font-size:0.78rem;padding:6px 12px;" onclick="downloadJSON()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            .json
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Output Tabs -->
+                <div class="output-tabs">
+                    <button class="output-tab active" id="otab-code" onclick="switchOutputTab('code')">PlantUML Code</button>
+                    <button class="output-tab" id="otab-preview" onclick="switchOutputTab('preview')">Preview</button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="output-content">
+                    <!-- Code Panel -->
+                    <div class="output-panel active" id="opanel-code">
+                        <div class="code-toolbar">
+                            <span class="code-toolbar-left" id="code-lang-label">PlantUML</span>
+                            <div class="code-toolbar-right">
+                                <button class="btn btn-ghost" style="font-size:0.75rem;padding:5px 10px;" onclick="copyCode()" id="copy-btn">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+                        <div class="code-block">
+                            <pre id="uml-code"></pre>
+                        </div>
+                    </div>
+
+                    <!-- Preview Panel -->
+                    <div class="output-panel" id="opanel-preview">
+                        <div class="preview-panel">
+                            <div id="preview-container">
+                                <div class="preview-loading" id="preview-loading">
+                                    <div class="preview-spinner"></div>
+                                    <p>Rendering diagram...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        /* ── State ───────────────────────────────── */
+        let currentUML      = null;
+        let currentInput    = null;
+        let currentHistoryId = null;
+        let refinementCount = 0;
+        const MAX_REFINEMENTS = 5;
+
+        /* ── Sidebar Tab Switching ─────────────────── */
+        function switchSidebarTab(tab) {
+            ['generate','refine','history'].forEach(t => {
+                document.getElementById(`tab-${t}-btn`).classList.toggle('active', t === tab);
+                document.getElementById(`panel-${t}`).classList.toggle('active', t === tab);
+            });
+            if (tab === 'history') refreshHistoryPanel();
+        }
+
+        /* ── Output Tab Switching ──────────────────── */
+        function switchOutputTab(tab) {
+            ['code','preview'].forEach(t => {
+                document.getElementById(`otab-${t}`).classList.toggle('active', t === tab);
+                document.getElementById(`opanel-${t}`).classList.toggle('active', t === tab);
+            });
+        }
+
+        /* ── Char Counter ──────────────────────────── */
+        function updateCharCount() {
+            const len = document.getElementById('description-input').value.length;
+            document.getElementById('char-count').textContent = `${len} chars`;
+        }
+
+        /* ── Keyboard Shortcuts ────────────────────── */
+        function handleKeydown(e) {
+            if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); generateUML(); }
+        }
+        function handleRefineKeydown(e) {
+            if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); refineUML(); }
+        }
+
+        /* ── Loading ───────────────────────────────── */
+        function setLoading(active, msg = 'Generating diagram...') {
+            const overlay = document.getElementById('loading-overlay');
+            document.getElementById('loading-text').textContent = msg;
+            overlay.classList.toggle('active', active);
+            document.querySelectorAll('.btn').forEach(b => b.disabled = active);
+        }
+
+        /* ── Toast ─────────────────────────────────── */
+        function toast(type, msg) {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = `toast ${type}`;
+            const icons = {
+                success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>',
+                error:   '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+                info:    '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+            };
+            el.innerHTML = `${icons[type] || icons.info}${msg}`;
+            container.appendChild(el);
+            setTimeout(() => {
+                el.classList.add('toast-out');
+                setTimeout(() => el.remove(), 260);
+            }, 3800);
+        }
+
+        /* ── Generate UML ──────────────────────────── */
+        function generateUML() {
+            const input = document.getElementById('description-input').value.trim();
+            if (!input) { toast('error', 'Please enter a description first.'); return; }
+
+            currentInput = input;
+            refinementCount = 0;
+            setLoading(true, 'Generating diagram...');
+
+            fetch('/api/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: input})
+            })
+            .then(r => r.json())
+            .then(data => {
+                setLoading(false);
+                if (data.success) {
+                    currentUML = data.uml;
+                    currentHistoryId = data.history_id;
+                    displayOutput(data);
+                    // Clear refine log
+                    const log = document.getElementById('refine-log');
+                    log.innerHTML = '';
+                    log.classList.add('hidden');
+                    toast('success', 'Diagram generated successfully.');
+                    showRefineForm(true);
+                } else {
+                    toast('error', data.error || 'Generation failed.');
+                }
+            })
+            .catch(e => { setLoading(false); toast('error', 'Request failed: ' + e.message); });
+        }
+
+        /* ── Refine UML ────────────────────────────── */
+        function refineUML() {
+            const feedback = document.getElementById('refinement-feedback').value.trim();
+            if (!feedback || !currentUML) { toast('error', 'Enter refinement feedback first.'); return; }
+            if (refinementCount >= MAX_REFINEMENTS) { toast('error', `Max refinements (${MAX_REFINEMENTS}) reached.`); return; }
+
+            setLoading(true, 'Applying refinement...');
+
+            fetch('/api/refine', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ uml: currentUML, text: currentInput, feedback, history_id: currentHistoryId })
+            })
+            .then(r => r.json())
+            .then(data => {
+                setLoading(false);
+                if (data.success) {
+                    currentUML = data.uml;
+                    refinementCount++;
+                    displayOutput(data);
+                    addRefineLogEntry(feedback);
+                    document.getElementById('refinement-feedback').value = '';
+                    document.getElementById('refine-count-display').textContent = refinementCount;
+                    document.getElementById('refine-count-stat').textContent = refinementCount;
+                    toast('success', `Refinement ${refinementCount}/${MAX_REFINEMENTS} applied.`);
+                } else {
+                    toast('error', data.error || 'Refinement failed.');
+                }
+            })
+            .catch(e => { setLoading(false); toast('error', 'Request failed: ' + e.message); });
+        }
+
+        /* ── Display Output ────────────────────────── */
+        function displayOutput(data) {
+            document.getElementById('empty-state').classList.add('hidden');
+            const oSection = document.getElementById('output-section');
+            oSection.classList.remove('hidden');
+            oSection.style.display = 'flex';
+
+            document.getElementById('uml-code').textContent = data.uml;
+            document.getElementById('class-count').textContent  = data.class_count || 0;
+            document.getElementById('rel-count').textContent    = data.rel_count || 0;
+            document.getElementById('refine-count-stat').textContent = refinementCount;
+
+            renderPreview(data.uml);
+        }
+
+        /* ── PlantUML Encoding (deflate + custom base64) ─── */
+        function plantumlEncode(text) {
+            // PlantUML uses: UTF-8 → DEFLATE (raw) → custom alphabet → ~1 prefix
+            // ~1 tells PlantUML server this is DEFLATE-compressed (not old Huffman format)
+            const PUML_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
+            const utf8 = new TextEncoder().encode(text);
+            // Use raw deflate (no zlib header)
+            const deflated = pako.deflateRaw(utf8, { level: 9 });
+            let result = '';
+            
+            // Encode bytes in groups - only output chars for actual data (no padding)
+            for (let i = 0; i < deflated.length; i += 3) {
+                const b0 = deflated[i];
+                const b1 = (i + 1 < deflated.length) ? deflated[i + 1] : 0;
+                const b2 = (i + 2 < deflated.length) ? deflated[i + 2] : 0;
+                const padding = deflated.length % 3;
+                
+                result += PUML_CHARS[(b0 >> 2) & 0x3F];
+                result += PUML_CHARS[((b0 & 0x03) << 4) | ((b1 >> 4) & 0x0F)];
+                
+                // Only add 3rd char if we have at least 2 bytes
+                if (i + 1 < deflated.length) {
+                    result += PUML_CHARS[((b1 & 0x0F) << 2) | ((b2 >> 6) & 0x03)];
+                }
+                
+                // Only add 4th char if we have all 3 bytes
+                if (i + 2 < deflated.length) {
+                    result += PUML_CHARS[b2 & 0x3F];
+                }
+            }
+            
+            // CRITICAL: ~1 prefix tells PlantUML this is DEFLATE format
+            return '~1' + result;
+        }
+
+        function krokiEncode(text) {
+            // Kroki uses: UTF-8 → gzip deflate → base64url
+            const utf8 = new TextEncoder().encode(text);
+            const compressed = pako.deflate(utf8, { level: 9 });
+            let binary = '';
+            compressed.forEach(b => binary += String.fromCharCode(b));
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        /* ── Render Preview ─────────────────────────── */
+        function renderPreview(plantUmlCode) {
+            const container = document.getElementById('preview-container');
+            container.innerHTML = '<div class="preview-loading"><div class="preview-spinner"></div><p>Rendering diagram...</p></div>';
+
+            try {
+                const pumlEncoded  = plantumlEncode(plantUmlCode);
+                const krokiEncoded = krokiEncode(plantUmlCode);
+
+                // Try Kroki FIRST (more reliable), then fallback to PlantUML
+                const services = [
+                    { url: `https://kroki.io/plantuml/svg/${krokiEncoded}`, name: 'Kroki SVG' },
+                    { url: `https://www.plantuml.com/plantuml/svg/${pumlEncoded}`, name: 'PlantUML SVG' },
+                    { url: `https://www.plantuml.com/plantuml/png/${pumlEncoded}`, name: 'PlantUML PNG' },
+                ];
+                let idx = 0;
+
+                function tryNext() {
+                    if (idx >= services.length) { showPreviewFallback(pumlEncoded); return; }
+                    const service = services[idx];
+                    const img = document.createElement('img');
+                    img.src = service.url;
+                    img.alt = 'UML Diagram';
+                    img.style.maxWidth = '100%';
+
+                    const timeout = setTimeout(() => { 
+                        console.log(`${service.name} timeout after 10s`);
+                        idx++; 
+                        tryNext(); 
+                    }, 10000);
+                    
+                    img.onerror = () => { 
+                        console.log(`${service.name} failed to load`);
+                        clearTimeout(timeout); 
+                        idx++; 
+                        tryNext(); 
+                    };
+                    
+                    img.onload  = () => {
+                        console.log(`${service.name} loaded successfully`);
+                        clearTimeout(timeout);
+                        container.innerHTML = '';
+                        const wrap = document.createElement('div');
+                        wrap.className = 'preview-inner';
+                        wrap.appendChild(img);
+                        container.appendChild(wrap);
+                    };
+                }
+                tryNext();
+
+            } catch(e) {
+                container.innerHTML = `<p style="color:var(--danger);padding:32px;">Error rendering diagram: ${e.message}</p>`;
+                console.error('Render error:', e);
+            }
+        }
+
+        function showPreviewFallback(pumlEncoded) {
+            document.getElementById('preview-container').innerHTML = `
+                <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:12px;padding:28px;max-width:440px;text-align:center;">
+                    <p style="color:var(--warn);font-weight:600;margin-bottom:10px;">Diagram Preview Unavailable</p>
+                    <p style="color:var(--text-3);font-size:0.83rem;margin-bottom:18px;">The online rendering service is temporarily unavailable. View the code in the Code tab or open it in the PlantUML editor.</p>
+                    <a href="https://www.plantuml.com/plantuml/uml/${pumlEncoded}" target="_blank"
+                       style="display:inline-block;padding:9px 18px;background:var(--accent);color:white;border-radius:8px;text-decoration:none;font-size:0.83rem;font-weight:600;">
+                        Open in PlantUML Editor
+                    </a>
+                </div>`;
+        }
+
+        /* ── Refine Log Entry ──────────────────────── */
+        function addRefineLogEntry(feedback) {
+            const log = document.getElementById('refine-log');
+            log.classList.remove('hidden');
+            const entry = document.createElement('div');
+            entry.className = 'refine-log-entry';
+            const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            entry.innerHTML = `<div class="log-time">${now} &mdash; Refinement #${refinementCount}</div>${escapeHtml(feedback)}`;
+            log.prepend(entry);
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        /* ── Show Refine Form ──────────────────────── */
+        function showRefineForm(show) {
+            document.getElementById('refine-no-uml').classList.toggle('hidden', show);
+            document.getElementById('refine-form').classList.toggle('hidden', !show);
+        }
+
+        /* ── Load Example ──────────────────────────── */
+        function loadExample() {
+            fetch('/api/example')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('description-input').value = data.example;
+                updateCharCount();
+                toast('info', 'Example description loaded.');
+            });
+        }
+
+        /* ── Clear Input ───────────────────────────── */
+        function clearInput() {
+            document.getElementById('description-input').value = '';
+            updateCharCount();
+        }
+
+        /* ── History Panel ─────────────────────────── */
+        function refreshHistoryPanel() {
+            fetch('/api/history')
+            .then(r => r.json())
+            .then(items => {
+                const list = document.getElementById('history-list');
+                const empty = document.getElementById('history-empty');
+                if (!items.length) { empty.style.display = 'block'; return; }
+                empty.style.display = 'none';
+                list.innerHTML = '';
+                list.appendChild(empty);
+                items.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'history-card';
+                    const classCount = (item.uml.match(/class /g) || []).length;
+                    const relCount   = (item.uml.match(/--/g) || []).length;
+                    const time = new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                    card.innerHTML = `
+                        <div class="history-card-desc">${escapeHtml(item.input)}</div>
+                        <div class="history-card-meta">
+                            <span class="history-chip classes">${classCount} classes</span>
+                            <span class="history-chip">${relCount} rels</span>
+                            <span class="history-chip">${item.refinements} refines</span>
+                            <span class="history-chip">${time}</span>
+                        </div>`;
+                    card.onclick = () => restoreFromHistory(item);
+                    list.prepend(card);
+                });
+            });
+        }
+
+        function restoreFromHistory(item) {
+            currentUML = item.uml;
+            currentInput = item.input;
+            currentHistoryId = item.id;
+            refinementCount = item.refinements || 0;
+            displayOutput({
+                uml: item.uml,
+                class_count: (item.uml.match(/class /g) || []).length,
+                rel_count: (item.uml.match(/--/g) || []).length
+            });
+            showRefineForm(true);
+            switchSidebarTab('generate');
+            document.getElementById('description-input').value = item.input;
+            updateCharCount();
+            toast('info', 'Diagram restored from history.');
+        }
+
+        function clearHistory() {
+            fetch('/api/history/clear', { method: 'POST' })
+            .then(() => {
+                refreshHistoryPanel();
+                toast('info', 'Session history cleared.');
+            });
+        }
+
+        /* ── Download ──────────────────────────────── */
+        function downloadPuml() {
+            if (!currentUML) return;
+            downloadFile(new Blob([currentUML], {type:'text/plain'}), `diagram_${Date.now()}.puml`);
+        }
+
+        function downloadJSON() {
+            if (!currentUML) return;
+            const obj = { input: currentInput, uml: currentUML, refinements: refinementCount, timestamp: new Date().toISOString(), model: 'gemini-2.5-flash' };
+            downloadFile(new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'}), `diagram_${Date.now()}.json`);
+        }
+
+        function downloadFile(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+        }
+
+        /* ── Copy Code ─────────────────────────────── */
+        function copyCode() {
+            if (!currentUML) return;
+            navigator.clipboard.writeText(currentUML).then(() => {
+                const btn = document.getElementById('copy-btn');
+                const orig = btn.innerHTML;
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+                btn.style.color = 'var(--success)';
+                setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
+            });
+        }
+
+        /* ── Init ──────────────────────────────────── */
+        updateCharCount();
+    </script>
+</body>
+</html>
